@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:orientation="vertical"
+    android:layout_height="match_parent"
+    android:weightSum="1"
+    tools:context=".Calls">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="0.9"
+        android:orientation="vertical"
+        android:layout_gravity="center">
+
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Junaid Jamshid"
+            android:textSize="24sp"
+            android:textColor="@android:color/black"
+            android:textStyle="bold"
+            android:layout_gravity="center"
+            android:layout_marginTop="30dp"/>
+
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+
+
+            <de.hdodenhof.circleimageview.CircleImageView
+                android:layout_width="150dp"
+                android:layout_height="150dp"
+                android:src="@drawable/junaid1"
+                android:layout_gravity="center"
+                android:layout_marginBottom="20dp"/>
+
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="10:32"
+                android:textSize="28sp"
+                android:textColor="@android:color/black"
+                android:textStyle="bold"
+                android:layout_gravity="center"/>
+        </LinearLayout>
+
+    </LinearLayout>
+
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:orientation="horizontal"
+        android:layout_weight="0.1"
+        android:layout_margin="15dp"
+        android:background="@drawable/rounded_bg"
+        android:padding="12dp"
+        android:elevation="6dp"
+        android:gravity="center"
+        android:layout_gravity="center">
+
+
+        <ImageView
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:src="@drawable/point"
+            android:background="@drawable/icon_bg"
+            android:padding="12dp"
+            android:scaleType="centerInside"
+            android:layout_margin="8dp"
+            app:tint="@android:color/white" />
+
+
+        <ImageView
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:src="@drawable/video_camera"
+            android:background="@drawable/icon_bg"
+            android:padding="12dp"
+            android:scaleType="centerInside"
+            android:layout_margin="8dp"
+            app:tint="@android:color/white" />
+
+
+        <ImageView
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:src="@drawable/loud_speaker"
+            android:background="@drawable/icon_bg"
+            android:padding="12dp"
+            android:scaleType="centerInside"
+            android:layout_margin="8dp"
+            app:tint="@android:color/white" />
+
+
+        <ImageView
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:src="@drawable/mute"
+            android:background="@drawable/icon_bg"
+            android:padding="12dp"
+            android:scaleType="centerInside"
+            android:layout_margin="8dp"
+            app:tint="@android:color/white" />
+
+
+        <ImageView
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:id="@+id/EndCall"
+            android:src="@drawable/telephone"
+            android:background="@drawable/red_circle"
+            android:padding="12dp"
+            android:scaleType="centerInside"
+            android:layout_margin="8dp"
+            app:tint="@android:color/white" />
+    </LinearLayout>
+
+
+
+</LinearLayout>
