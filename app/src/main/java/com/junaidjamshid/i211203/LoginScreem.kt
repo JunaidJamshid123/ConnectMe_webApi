@@ -8,18 +8,27 @@ import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.google.firebase.auth.FirebaseAuth
+import com.junaidjamshid.i211203.HelperClasses.ApiService
+import com.junaidjamshid.i211203.HelperClasses.NetworkUtils
+import com.junaidjamshid.i211203.HelperClasses.SessionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-class LoginScreem : AppCompatActivity() {
-    private lateinit var auth: FirebaseAuth
+class LoginScreen : AppCompatActivity() {
     private lateinit var progressDialog: ProgressDialog
+    private lateinit var sessionManager: SessionManager
+    private lateinit var apiService: ApiService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         supportActionBar?.hide()
         setContentView(R.layout.activity_login_screem)
 
-        auth = FirebaseAuth.getInstance()
+        sessionManager = SessionManager(this)
+        apiService = ApiService(this)
+
         progressDialog = ProgressDialog(this)
         progressDialog.setMessage("Logging in...")
         progressDialog.setCancelable(false)
@@ -31,7 +40,6 @@ class LoginScreem : AppCompatActivity() {
 
         registerLink.setOnClickListener {
             val intent = Intent(this, SignUpScreen::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
             startActivity(intent)
         }
 
@@ -50,19 +58,49 @@ class LoginScreem : AppCompatActivity() {
     private fun loginUser(email: String, password: String) {
         progressDialog.show()
 
-        auth.signInWithEmailAndPassword(email, password)
-            .addOnCompleteListener { task ->
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val result = apiService.loginUser(email, password)
+
                 progressDialog.dismiss()
-                if (task.isSuccessful) {
-                    Toast.makeText(this, "Login Successful!", Toast.LENGTH_SHORT).show()
-                    val intent = Intent(this, MainActivity::class.java)
-                    intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-                    startActivity(intent)
-                    finish()
+
+                if (result.isSuccess) {
+                    val user = result.getOrNull()
+
+                    if (user != null) {
+                        // Check if this is the first login for the user
+                        if (user.bio.isEmpty() && user.profilePicture == null) {
+                            sessionManager.setFirstTimeUser(true)
+                            navigateToProfileSetup()
+                        } else {
+                            sessionManager.setFirstTimeUser(false)
+                            navigateToMainActivity()
+                        }
+
+                        Toast.makeText(this@LoginScreen, "Login successful!", Toast.LENGTH_SHORT).show()
+                    }
                 } else {
-                    val errorMessage = task.exception?.message ?: "Login failed! Please try again."
-                    Toast.makeText(this, errorMessage, Toast.LENGTH_SHORT).show()
+                    val error = result.exceptionOrNull()?.message ?: "Login failed"
+                    Toast.makeText(this@LoginScreen, error, Toast.LENGTH_LONG).show()
                 }
+            } catch (e: Exception) {
+                progressDialog.dismiss()
+                Toast.makeText(this@LoginScreen, "Error: ${e.message}", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    private fun navigateToMainActivity() {
+        val intent = Intent(this, MainActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        startActivity(intent)
+        finish()
+    }
+
+    private fun navigateToProfileSetup() {
+        val intent = Intent(this, EditProfile::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        startActivity(intent)
+        finish()
     }
 }

@@ -8,26 +8,27 @@ import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.DatabaseReference
-import com.google.firebase.database.FirebaseDatabase
-import com.junaidjamshid.i211203.models.User
+import com.junaidjamshid.i211203.HelperClasses.ApiService
+import com.junaidjamshid.i211203.HelperClasses.NetworkUtils
+import com.junaidjamshid.i211203.HelperClasses.SessionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.util.UUID
 
 class SignUpScreen : AppCompatActivity() {
-
-    private lateinit var auth: FirebaseAuth
-    private lateinit var database: DatabaseReference
     private lateinit var progressDialog: ProgressDialog
+    private lateinit var sessionManager: SessionManager
+    private lateinit var apiService: ApiService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         supportActionBar?.hide()
         setContentView(R.layout.activity_sign_up_screen)
 
-        auth = FirebaseAuth.getInstance()
-        database = FirebaseDatabase.getInstance().reference
+        sessionManager = SessionManager(this)
+        apiService = ApiService(this)
 
-        // Initialize Progress Dialog
         progressDialog = ProgressDialog(this)
         progressDialog.setMessage("Creating account...")
         progressDialog.setCancelable(false)
@@ -35,78 +36,97 @@ class SignUpScreen : AppCompatActivity() {
         val loginLink = findViewById<TextView>(R.id.LoginLink)
         val fullName = findViewById<EditText>(R.id.FullName)
         val username = findViewById<EditText>(R.id.username)
-        val phone = findViewById<EditText>(R.id.Phone)
+        val phoneNumber = findViewById<EditText>(R.id.Phone)
         val email = findViewById<EditText>(R.id.Email)
         val password = findViewById<EditText>(R.id.Password)
         val registerBtn = findViewById<Button>(R.id.registerBtn)
 
+
         loginLink.setOnClickListener {
-            val intent = Intent(this, LoginScreem::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-            startActivity(intent)
+            finish()
         }
 
         registerBtn.setOnClickListener {
             val fullNameInput = fullName.text.toString().trim()
             val usernameInput = username.text.toString().trim()
-            val phoneInput = phone.text.toString().trim()
             val emailInput = email.text.toString().trim()
             val passwordInput = password.text.toString().trim()
+            val phoneNumberInput = phoneNumber.text.toString().trim()
 
-            if (fullNameInput.isEmpty() || usernameInput.isEmpty() || phoneInput.isEmpty() ||
-                emailInput.isEmpty() || passwordInput.isEmpty()) {
-                Toast.makeText(this, "All fields are required", Toast.LENGTH_SHORT).show()
+            if (fullNameInput.isEmpty() || usernameInput.isEmpty() || emailInput.isEmpty() || passwordInput.isEmpty()) {
+                Toast.makeText(this, "All fields are required except phone number", Toast.LENGTH_SHORT).show()
+            } else if (passwordInput.length < 6) {
+                Toast.makeText(this, "Password must be at least 6 characters", Toast.LENGTH_SHORT).show()
             } else {
-                signUpUser(fullNameInput, usernameInput, phoneInput, emailInput, passwordInput)
+                // Check if network is available
+                if (!NetworkUtils.isNetworkAvailable(this)) {
+                    Toast.makeText(
+                        this,
+                        "Internet connection required for registration",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@setOnClickListener
+                }
+
+                registerUser(
+                    UUID.randomUUID().toString(),
+                    usernameInput,
+                    emailInput,
+                    passwordInput,
+                    fullNameInput,
+                    phoneNumberInput
+                )
             }
         }
     }
 
-    private fun signUpUser(fullName: String, username: String, phone: String, email: String, password: String) {
+    private fun registerUser(
+        userId: String,
+        username: String,
+        email: String,
+        password: String,
+        fullName: String,
+        phoneNumber: String
+    ) {
         progressDialog.show()
 
-        auth.createUserWithEmailAndPassword(email, password)
-            .addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val userId = auth.currentUser?.uid
-                    if (userId != null) {
-                        val user = User(
-                            userId = userId,
-                            username = username,
-                            email = email,
-                            fullName = fullName,
-                            phoneNumber = phone,
-                            profilePicture = null,
-                            coverPhoto = null,
-                            bio = "",
-                            followers = hashMapOf(),
-                            following = hashMapOf(),
-                            blockedUsers = hashMapOf(),
-                            onlineStatus = false,
-                            pushToken = "",
-                            createdAt = System.currentTimeMillis(),
-                            lastSeen = System.currentTimeMillis(),
-                            vanishModeEnabled = false,
-                            storyExpiryTimestamp = null
-                        )
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val result = apiService.registerUser(
+                    userId, username, email, password, fullName, phoneNumber
+                )
 
-                        database.child("Users").child(userId).setValue(user)
-                            .addOnCompleteListener { dbTask ->
-                                progressDialog.dismiss()
+                progressDialog.dismiss()
 
-                                if (dbTask.isSuccessful) {
-                                    Toast.makeText(this, "Registration successful!", Toast.LENGTH_SHORT).show()
-                                    startActivity(Intent(this, EditProfile::class.java))
-                                    finish()
-                                } else {
-                                    Toast.makeText(this, "Failed to store user data: ${dbTask.exception?.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                if (result.isSuccess) {
+                    val user = result.getOrNull()
+
+                    if (user != null) {
+                        sessionManager.setFirstTimeUser(true)
+                        Toast.makeText(
+                            this@SignUpScreen,
+                            "Registration successful!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        // Navigate to profile setup
+                        val intent = Intent(this@SignUpScreen, ProfileSetupActivity::class.java)
+                        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                        startActivity(intent)
+                        finish()
                     }
                 } else {
-                    progressDialog.dismiss()
-                    Toast.makeText(this, "Registration failed: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
+                    val error = result.exceptionOrNull()?.message ?: "Registration failed"
+                    Toast.makeText(this@SignUpScreen, error, Toast.LENGTH_LONG).show()
                 }
+            } catch (e: Exception) {
+                progressDialog.dismiss()
+                Toast.makeText(
+                    this@SignUpScreen,
+                    "Error: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
+        }
     }
 }
