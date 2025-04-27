@@ -57,6 +57,7 @@ class ApiService(private val context: Context) {
     }
 
     // Login User
+    // Login User
     suspend fun loginUser(email: String, password: String): Result<User> = withContext(Dispatchers.IO) {
         if (isNetworkAvailable()) {
             try {
@@ -98,7 +99,7 @@ class ApiService(private val context: Context) {
                     val user = User().apply {
                         userId = userJson.getString("userId")
                         username = userJson.getString("username")
-                        //email = userJson.getString("email")
+                        this.email = email // Set the email from the login parameters
                         fullName = userJson.getString("fullName")
                         phoneNumber = userJson.optString("phoneNumber", "")
                         profilePicture = userJson.optString("profilePicture", null)
@@ -108,10 +109,14 @@ class ApiService(private val context: Context) {
                         lastSeen = userJson.optLong("lastSeen", System.currentTimeMillis())
                     }
 
-                    // Save user and token to local storage
-                    dbHelper.saveUser(user)
+                    // Save user WITH password to local storage
+                    val dbHelper = DatabaseHelper(context)
+                    dbHelper.saveUserWithPassword(user, password) // Use password parameter
+
+                    // Store auth token
                     val expiryTimeMillis = System.currentTimeMillis() + (7 * 24 * 60 * 60 * 1000) // 7 days
                     sessionManager.createLoginSession(user.userId, token, expiryTimeMillis)
+                    dbHelper.saveAuthToken(user.userId, token, expiryTimeMillis)
 
                     return@withContext Result.success(user)
                 } else {
@@ -136,6 +141,7 @@ class ApiService(private val context: Context) {
             }
         } else {
             // Offline login
+            val dbHelper = DatabaseHelper(context)
             val user = dbHelper.getUserByEmail(email)
             if (user != null && dbHelper.checkPassword(email, password)) {
                 // Check if we have a token stored for this user

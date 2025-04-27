@@ -15,8 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.util.Log
 
-class LoginScreen : AppCompatActivity() {
+class LoginScreem : AppCompatActivity() {
     private lateinit var progressDialog: ProgressDialog
     private lateinit var sessionManager: SessionManager
     private lateinit var apiService: ApiService
@@ -77,15 +78,16 @@ class LoginScreen : AppCompatActivity() {
                             navigateToMainActivity()
                         }
 
-                        Toast.makeText(this@LoginScreen, "Login successful!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@LoginScreem, "Login successful!", Toast.LENGTH_SHORT).show()
                     }
                 } else {
                     val error = result.exceptionOrNull()?.message ?: "Login failed"
-                    Toast.makeText(this@LoginScreen, error, Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@LoginScreem, error, Toast.LENGTH_LONG).show()
+                    Log.e("LoginError", "Error: $error")
                 }
             } catch (e: Exception) {
                 progressDialog.dismiss()
-                Toast.makeText(this@LoginScreen, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@LoginScreem ,"Error: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
