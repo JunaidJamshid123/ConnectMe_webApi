@@ -268,6 +268,7 @@ class StoryDisplayActivity : AppCompatActivity() {
         }
 
         // Check if user already viewed the story
+        /*
         if (!story.viewers.contains(currentUserId)) {
             // Add user to viewers list
             story.viewers.add(currentUserId)
@@ -281,6 +282,8 @@ class StoryDisplayActivity : AppCompatActivity() {
                     Log.e(TAG, "Error marking story as viewed: ${e.message}")
                 }
         }
+
+         */
     }
 
     // Helper function to decode Base64 string to Bitmap

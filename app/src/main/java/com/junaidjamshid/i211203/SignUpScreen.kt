@@ -3,6 +3,7 @@ package com.junaidjamshid.i211203
 import android.app.ProgressDialog
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -15,7 +16,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.UUID
-
 class SignUpScreen : AppCompatActivity() {
     private lateinit var progressDialog: ProgressDialog
     private lateinit var sessionManager: SessionManager
@@ -41,7 +41,6 @@ class SignUpScreen : AppCompatActivity() {
         val password = findViewById<EditText>(R.id.Password)
         val registerBtn = findViewById<Button>(R.id.registerBtn)
 
-
         loginLink.setOnClickListener {
             finish()
         }
@@ -52,13 +51,19 @@ class SignUpScreen : AppCompatActivity() {
             val emailInput = email.text.toString().trim()
             val passwordInput = password.text.toString().trim()
             val phoneNumberInput = phoneNumber.text.toString().trim()
+            val userId = UUID.randomUUID().toString()
 
-            if (fullNameInput.isEmpty() || usernameInput.isEmpty() || emailInput.isEmpty() || passwordInput.isEmpty()) {
-                Toast.makeText(this, "All fields are required except phone number", Toast.LENGTH_SHORT).show()
+            Log.d("SignUpScreen", "fullName: '$fullNameInput'")
+            Log.d("SignUpScreen", "username: '$usernameInput'")
+            Log.d("SignUpScreen", "email: '$emailInput'")
+            Log.d("SignUpScreen", "password: '$passwordInput'")
+            Log.d("SignUpScreen", "phone: '$phoneNumberInput'")
+            // Now all fields are required, including phone number
+            if (fullNameInput.isEmpty() || usernameInput.isEmpty() || emailInput.isEmpty() || passwordInput.isEmpty() || phoneNumberInput.isEmpty()) {
+                Toast.makeText(this, "All of the fields are required", Toast.LENGTH_SHORT).show()
             } else if (passwordInput.length < 6) {
                 Toast.makeText(this, "Password must be at least 6 characters", Toast.LENGTH_SHORT).show()
             } else {
-                // Check if network is available
                 if (!NetworkUtils.isNetworkAvailable(this)) {
                     Toast.makeText(
                         this,
@@ -69,7 +74,7 @@ class SignUpScreen : AppCompatActivity() {
                 }
 
                 registerUser(
-                    UUID.randomUUID().toString(),
+                    userId, // Firebase will generate UID
                     usernameInput,
                     emailInput,
                     passwordInput,
@@ -109,8 +114,7 @@ class SignUpScreen : AppCompatActivity() {
                             Toast.LENGTH_SHORT
                         ).show()
 
-                        // Navigate to profile setup
-                        val intent = Intent(this@SignUpScreen, EditProfile::class.java)
+                        val intent = Intent(this@SignUpScreen, MainActivity::class.java)
                         intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
                         startActivity(intent)
                         finish()

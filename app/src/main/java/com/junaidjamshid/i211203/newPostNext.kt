@@ -203,7 +203,7 @@ class newPostNext : AppCompatActivity() {
             caption = captionInput.text.toString().trim(),
             timestamp = currentTime,
             expiryTimestamp = expiryTime,
-            viewers = mutableListOf()
+
         )
 
         // Update the user's storyExpiryTimestamp

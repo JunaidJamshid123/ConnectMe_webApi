@@ -1,15 +1,33 @@
 package com.junaidjamshid.i211203.models
 
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
+
+@JsonClass(generateAdapter = true)
 class Story {
-    var storyId: String = ""         // Unique ID for the story
-    var userId: String = ""          // ID of the user who posted the story
-    var username: String = ""        // Username of the user
-    var userProfileImage: String = "" // Profile image URL of the user
-    var storyImageUrl: String = ""   // URL of the uploaded story image (if any)
-    var caption: String = ""         // Caption for the story (optional)
+    @Json(name = "id")
+    var storyId: String = ""          // Unique ID for the story
+    
+    @Json(name = "userId")
+    var userId: String = ""          // ID of the user who created the story
+    
+    @Json(name = "username")
+    var username: String = ""        // Username of the creator
+    
+    @Json(name = "userProfileImage")
+    var userProfileImage: String = ""// Profile image URL of the user
+    
+    @Json(name = "storyImageUrl")
+    var storyImageUrl: String = ""   // URL of the story image
+    
+    @Json(name = "caption")
+    var caption: String = ""         // Story description or caption
+    
+    @Json(name = "timestamp")
     var timestamp: Long = 0          // Time when the story was created (Unix timestamp)
-    var expiryTimestamp: Long = 0    // Time when the story expires (Unix timestamp, 24 hours after creation)
-    var viewers: MutableList<String> = mutableListOf() // List of user IDs who viewed the story
+    
+    @Json(name = "expiryTimestamp")
+    var expiryTimestamp: Long = 0    // Time when the story will expire (Unix timestamp)
 
     constructor()
 
@@ -21,8 +39,7 @@ class Story {
         storyImageUrl: String,
         caption: String,
         timestamp: Long,
-        expiryTimestamp: Long,
-        viewers: MutableList<String>
+        expiryTimestamp: Long
     ) {
         this.storyId = storyId
         this.userId = userId
@@ -32,6 +49,5 @@ class Story {
         this.caption = caption
         this.timestamp = timestamp
         this.expiryTimestamp = expiryTimestamp
-        this.viewers = viewers
     }
 }

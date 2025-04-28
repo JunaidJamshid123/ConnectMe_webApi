@@ -7,7 +7,9 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import com.junaidjamshid.i211203.HelperClasses.DatabaseHelper
 import com.junaidjamshid.i211203.models.User
+import com.junaidjamshid.i211203.models.Post
 import com.junaidjamshid.i211203.HelperClasses.SessionManager
+import com.junaidjamshid.i211203.models.Comment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -20,12 +22,13 @@ import java.util.*
 import kotlin.collections.HashMap
 
 class ApiService(private val context: Context) {
-    private val dbHelper = DatabaseHelper(context)
+     val dbHelper = DatabaseHelper(context)
     private val sessionManager = SessionManager(context)
 
     companion object {
         private const val BASE_URL = "http://10.0.2.2:3000/api" // For local testing
-        // private const val BASE_URL = "https://your-production-api.com/api" // For production
+        private const val POSTS_ENDPOINT = "/posts"
+        private const val UPLOAD_IMAGE_ENDPOINT = "/uploads/images"
 
         // API Endpoints
         private const val REGISTER_ENDPOINT = "/auth/register"
@@ -418,5 +421,344 @@ class ApiService(private val context: Context) {
     // Logout
     fun logout() {
         sessionManager.logout()
+    }
+
+    // Add this method to upload a post image to the server
+    suspend fun uploadPostImage(imageBase64: String): Result<String> = withContext(Dispatchers.IO) {
+        if (!isNetworkAvailable()) {
+            return@withContext Result.failure(Exception("No internet connection available for image upload"))
+        }
+
+        try {
+            val token = sessionManager.getAuthToken() ?: return@withContext Result.failure(Exception("Authentication token not found"))
+
+            val url = URL("$BASE_URL$UPLOAD_IMAGE_ENDPOINT")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Authorization", "Bearer $token")
+            connection.doOutput = true
+
+            val jsonBody = JSONObject().apply {
+                put("image", imageBase64)
+            }
+
+            OutputStreamWriter(connection.outputStream).use {
+                it.write(jsonBody.toString())
+                it.flush()
+            }
+
+            val responseCode = connection.responseCode
+
+            if (responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_CREATED) {
+                val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                val response = StringBuilder()
+                var line: String?
+
+                while (reader.readLine().also { line = it } != null) {
+                    response.append(line)
+                }
+
+                reader.close()
+                connection.disconnect()
+
+                val jsonResponse = JSONObject(response.toString())
+                val imageUrl = jsonResponse.getString("imageUrl")
+
+                return@withContext Result.success(imageUrl)
+            } else {
+                val reader = BufferedReader(InputStreamReader(connection.errorStream))
+                val errorResponse = StringBuilder()
+                var line: String?
+
+                while (reader.readLine().also { line = it } != null) {
+                    errorResponse.append(line)
+                }
+
+                reader.close()
+                connection.disconnect()
+
+                val jsonError = JSONObject(errorResponse.toString())
+                val errorMessage = jsonError.optString("error", "Image upload failed")
+
+                return@withContext Result.failure(Exception(errorMessage))
+            }
+        } catch (e: Exception) {
+            return@withContext Result.failure(e)
+        }
+    }
+
+    // Add this method to create a new post
+    suspend fun createPost(post: Post): Result<Post> = withContext(Dispatchers.IO) {
+        if (isNetworkAvailable()) {
+            try {
+                val token = sessionManager.getAuthToken() ?: return@withContext Result.failure(Exception("Authentication token not found"))
+
+                val url = URL("$BASE_URL$POSTS_ENDPOINT")
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.doOutput = true
+
+                val jsonBody = JSONObject().apply {
+                    put("postId", post.postId)
+                    put("userId", post.userId)
+                    put("username", post.username)
+                    put("userProfileImage", post.userProfileImage)
+                    put("postImageUrl", post.postImageUrl)
+                    put("caption", post.caption)
+                    // Timestamp will be set on the server, so no need to send it
+                }
+
+                OutputStreamWriter(connection.outputStream).use {
+                    it.write(jsonBody.toString())
+                    it.flush()
+                }
+
+                val responseCode = connection.responseCode
+
+                if (responseCode == HttpURLConnection.HTTP_CREATED) {
+                    val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                    val response = StringBuilder()
+                    var line: String?
+
+                    while (reader.readLine().also { line = it } != null) {
+                        response.append(line)
+                    }
+
+                    reader.close()
+                    connection.disconnect()
+
+                    val jsonResponse = JSONObject(response.toString())
+                    val postJson = jsonResponse.getJSONObject("post")
+
+                    val createdPost = Post().apply {
+                        postId = postJson.getString("postId")
+                        userId = postJson.getString("userId")
+                        username = postJson.getString("username")
+                        userProfileImage = postJson.optString("userProfileImage", "")
+                        postImageUrl = postJson.getString("postImageUrl")
+                        caption = postJson.optString("caption", "")
+                        timestamp = postJson.getLong("timestamp")
+                        // Server returns empty likes and comments initially
+                    }
+
+                    // Mark post as synced in local database
+                    dbHelper.updatePostSyncStatus(createdPost.postId, true)
+
+                    return@withContext Result.success(createdPost)
+                } else {
+                    val reader = BufferedReader(InputStreamReader(connection.errorStream))
+                    val errorResponse = StringBuilder()
+                    var line: String?
+
+                    while (reader.readLine().also { line = it } != null) {
+                        errorResponse.append(line)
+                    }
+
+                    reader.close()
+                    connection.disconnect()
+
+                    val jsonError = JSONObject(errorResponse.toString())
+                    val errorMessage = jsonError.optString("error", "Failed to create post")
+
+                    return@withContext Result.failure(Exception(errorMessage))
+                }
+            } catch (e: Exception) {
+                return@withContext Result.failure(e)
+            }
+        } else {
+            // Store post locally with sync status = unsynced
+            post.timestamp = System.currentTimeMillis()
+            val result = dbHelper.savePost(post)
+            return@withContext if (result != -1L) {
+                Result.success(post)
+            } else {
+                Result.failure(Exception("Failed to save post locally"))
+            }
+        }
+    }
+
+    // Add method to sync pending posts
+    suspend fun syncPendingPosts(): Result<Int> = withContext(Dispatchers.IO) {
+        if (!isNetworkAvailable()) {
+            return@withContext Result.failure(Exception("No internet connection available for syncing"))
+        }
+
+        try {
+            val token = sessionManager.getAuthToken() ?: return@withContext Result.failure(Exception("Authentication token not found"))
+
+            // Get all unsynced posts
+            val unsyncedPosts = dbHelper.getUnSyncedPosts()
+            var syncedCount = 0
+
+            for (post in unsyncedPosts) {
+                // If post contains a Base64 image, upload it first
+                if (post.postImageUrl.startsWith("data:image") || post.postImageUrl.length > 200) {
+                    val imageUploadResult = uploadPostImage(post.postImageUrl)
+                    if (imageUploadResult.isSuccess) {
+                        post.postImageUrl = imageUploadResult.getOrNull()!!
+                    } else {
+                        continue // Skip this post if image upload fails
+                    }
+                }
+
+                // Now create the post on the server
+                val url = URL("$BASE_URL$POSTS_ENDPOINT")
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.doOutput = true
+
+                val jsonBody = JSONObject().apply {
+                    put("postId", post.postId)
+                    put("userId", post.userId)
+                    put("username", post.username)
+                    put("userProfileImage", post.userProfileImage)
+                    put("postImageUrl", post.postImageUrl)
+                    put("caption", post.caption)
+                    put("timestamp", post.timestamp)
+                }
+
+                OutputStreamWriter(connection.outputStream).use {
+                    it.write(jsonBody.toString())
+                    it.flush()
+                }
+
+                val responseCode = connection.responseCode
+
+                if (responseCode == HttpURLConnection.HTTP_CREATED) {
+                    // Mark post as synced
+                    dbHelper.updatePostSyncStatus(post.postId, true)
+                    syncedCount++
+                }
+
+                connection.disconnect()
+            }
+
+            return@withContext Result.success(syncedCount)
+        } catch (e: Exception) {
+            return@withContext Result.failure(e)
+        }
+    }
+
+    // Add method to get all posts
+    suspend fun getPosts(page: Int, pageSize: Int): Result<List<Post>> = withContext(Dispatchers.IO) {
+        if (isNetworkAvailable()) {
+            try {
+                val token = sessionManager.getAuthToken() ?: return@withContext Result.failure(Exception("Authentication token not found"))
+
+                val url = URL("$BASE_URL$POSTS_ENDPOINT?page=$page&pageSize=$pageSize")
+                val connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("Authorization", "Bearer $token")
+
+                val responseCode = connection.responseCode
+
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                    val response = StringBuilder()
+                    var line: String?
+
+                    while (reader.readLine().also { line = it } != null) {
+                        response.append(line)
+                    }
+
+                    reader.close()
+                    connection.disconnect()
+
+                    val jsonResponse = JSONObject(response.toString())
+                    val postsArray = jsonResponse.getJSONArray("posts")
+
+                    val posts = mutableListOf<Post>()
+
+                    for (i in 0 until postsArray.length()) {
+                        val postJson = postsArray.getJSONObject(i)
+
+                        val post = Post().apply {
+                            postId = postJson.getString("postId")
+                            userId = postJson.getString("userId")
+                            username = postJson.getString("username")
+                            userProfileImage = postJson.optString("userProfileImage", "")
+                            postImageUrl = postJson.getString("postImageUrl")
+                            caption = postJson.optString("caption", "")
+                            timestamp = postJson.getLong("timestamp")
+
+                            // Parse likes
+                            val likesJson = postJson.optJSONObject("likes")
+                            if (likesJson != null) {
+                                val likesIterator = likesJson.keys()
+                                while (likesIterator.hasNext()) {
+                                    val key = likesIterator.next()
+                                    likes[key] = likesJson.getBoolean(key)
+                                }
+                            }
+
+                            // Parse comments
+                            /*
+                            val commentsArray = postJson.optJSONArray("comments")
+                            if (commentsArray != null) {
+                                for (j in 0 until commentsArray.length()) {
+                                    val commentJson = commentsArray.getJSONObject(j)
+                                    val comment = Comment(
+                                        commentId = commentJson.getString("commentId"),
+                                        userId = commentJson.getString("userId"),
+                                        username = commentJson.getString("username"),
+                                        userProfileImage = commentJson.optString("userProfileImage", ""),
+                                        text = commentJson.getString("text"),
+                                        timestamp = commentJson.getLong("timestamp")
+                                    )
+                                    comments.add(comment)
+                                }
+                            }
+                            */
+
+                        }
+
+                        posts.add(post)
+
+                        // Save post to local database for offline viewing
+                        dbHelper.savePost(post)
+                        dbHelper.updatePostSyncStatus(post.postId, true)
+                    }
+
+                    return@withContext Result.success(posts)
+                } else {
+                    val reader = BufferedReader(InputStreamReader(connection.errorStream))
+                    val errorResponse = StringBuilder()
+                    var line: String?
+
+                    while (reader.readLine().also { line = it } != null) {
+                        errorResponse.append(line)
+                    }
+
+                    reader.close()
+                    connection.disconnect()
+
+                    val jsonError = JSONObject(errorResponse.toString())
+                    val errorMessage = jsonError.optString("error", "Failed to fetch posts")
+
+                    return@withContext Result.failure(Exception(errorMessage))
+                }
+            } catch (e: Exception) {
+                // If network call fails, try to get posts from local database
+                val posts = dbHelper.getAllPosts(pageSize, (page - 1) * pageSize)
+                if (posts.isNotEmpty()) {
+                    return@withContext Result.success(posts)
+                } else {
+                    return@withContext Result.failure(e)
+                }
+            }
+        } else {
+            // Offline mode - get from local database
+            val posts = dbHelper.getAllPosts(pageSize, (page - 1) * pageSize)
+            if (posts.isNotEmpty()) {
+                return@withContext Result.success(posts)
+            } else {
+                return@withContext Result.failure(Exception("No posts found in offline storage"))
+            }
+        }
     }
 }

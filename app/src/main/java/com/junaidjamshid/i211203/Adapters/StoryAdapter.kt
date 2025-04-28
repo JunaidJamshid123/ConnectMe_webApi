@@ -1,65 +1,37 @@
 package com.junaidjamshid.i211203.Adapters
 
 import android.content.Context
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
-import androidx.cardview.widget.CardView
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.imageview.ShapeableImageView
 import com.junaidjamshid.i211203.R
-import com.junaidjamshid.i211203.StoryDisplayActivity
 import com.junaidjamshid.i211203.models.Story
-import java.util.*
+import de.hdodenhof.circleimageview.CircleImageView
 
-class StoryAdapter(private val context: Context) :
-    RecyclerView.Adapter<StoryAdapter.StoryViewHolder>() {
+class StoryAdapter(private val context: Context) : RecyclerView.Adapter<StoryAdapter.StoryViewHolder>() {
 
-    private val TAG = "StoryAdapter"
-    private var stories = mutableListOf<Story>()
-    private var storyListener: OnStoryClickListener? = null
+    private var stories: MutableList<Story> = mutableListOf()
 
-    // Interface for click events
     interface OnStoryClickListener {
         fun onStoryClick(story: Story, position: Int)
     }
 
-    // Set listener
+    private var listener: OnStoryClickListener? = null
+
     fun setOnStoryClickListener(listener: OnStoryClickListener) {
-        this.storyListener = listener
+        this.listener = listener
     }
 
-    // ViewHolder class
-    inner class StoryViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val cardViewStory: CardView = itemView.findViewById(R.id.cardViewStory)
-        val imgStoryProfile: ShapeableImageView = itemView.findViewById(R.id.imgStoryProfile)
-        val tvUsername: TextView = itemView.findViewById(R.id.tvUsername)
-
-        init {
-            // Set click listener for the whole item
-            itemView.setOnClickListener {
-                val position = adapterPosition
-                if (position != RecyclerView.NO_POSITION) {
-                    val story = stories[position]
-
-                    // Notify listener if set
-                    storyListener?.onStoryClick(story, position)
-
-                    // Launch StoryDisplayActivity directly
-                    val intent = Intent(context, StoryDisplayActivity::class.java).apply {
-                        putExtra("storyId", story.storyId)
-                        putExtra("userId", story.userId)
-                    }
-                    context.startActivity(intent)
-                }
-            }
-        }
+    fun setStories(stories: List<Story>) {
+        this.stories.clear()
+        this.stories.addAll(stories)
+        notifyDataSetChanged()
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): StoryViewHolder {
@@ -71,58 +43,44 @@ class StoryAdapter(private val context: Context) :
         val story = stories[position]
 
         // Set username
-        holder.tvUsername.text = story.username
+        holder.usernameText.text = story.username
 
-        // Set profile image from Base64 string
-        if (story.userProfileImage.isNotEmpty()) {
+        // Load profile image
+        if (!story.userProfileImage.isNullOrEmpty()) {
             try {
                 val bitmap = decodeBase64Image(story.userProfileImage)
                 bitmap?.let {
-                    holder.imgStoryProfile.setImageBitmap(it)
-                } ?: holder.imgStoryProfile.setImageResource(R.drawable.junaid1)
+                    holder.profileImage.setImageBitmap(it)
+                } ?: run {
+                    holder.profileImage.setImageResource(R.drawable.junaid1)
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Error loading profile image: ${e.message}")
-                holder.imgStoryProfile.setImageResource(R.drawable.junaid1)
+                holder.profileImage.setImageResource(R.drawable.junaid1)
             }
         } else {
-            holder.imgStoryProfile.setImageResource(R.drawable.junaid1)
+            holder.profileImage.setImageResource(R.drawable.junaid1)
         }
 
-        // Check if story is viewed
-        val currentTime = System.currentTimeMillis()
-
-        // Apply different style based on whether the story has expired
-        if (currentTime > story.expiryTimestamp) {
-            // Story expired - make it gray or change appearance
-            holder.imgStoryProfile.alpha = 0.7f
-            // Optionally change border
+        // Set click listener
+        holder.itemView.setOnClickListener {
+            listener?.onStoryClick(story, position)
         }
     }
 
     override fun getItemCount(): Int = stories.size
 
-    // Update the stories list
-    fun setStories(newStories: List<Story>) {
-        // Filter out expired stories
-        val currentTime = System.currentTimeMillis()
-        val validStories = newStories.filter { it.expiryTimestamp > currentTime }
-
-        // Sort by timestamp, newest first
-        val sortedStories = validStories.sortedByDescending { it.timestamp }
-
-        stories.clear()
-        stories.addAll(sortedStories)
-        notifyDataSetChanged()
-    }
-
-    // Helper function to decode Base64 string to Bitmap
     private fun decodeBase64Image(base64String: String): Bitmap? {
         return try {
             val decodedBytes = Base64.decode(base64String, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
         } catch (e: Exception) {
-            Log.e(TAG, "Error decoding Base64 image: ${e.message}")
+            e.printStackTrace()
             null
         }
+    }
+
+    inner class StoryViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val profileImage: CircleImageView = itemView.findViewById(R.id.imgStoryProfile)
+        val usernameText: TextView = itemView.findViewById(R.id.tvUsername)
     }
 }

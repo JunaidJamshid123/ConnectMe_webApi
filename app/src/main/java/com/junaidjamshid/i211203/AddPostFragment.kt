@@ -13,13 +13,12 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.fragment.app.Fragment
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.DataSnapshot
-import com.google.firebase.database.DatabaseError
-import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.database.ValueEventListener
+import androidx.lifecycle.lifecycleScope
+import com.junaidjamshid.i211203.HelperClasses.ApiService
+import com.junaidjamshid.i211203.HelperClasses.SessionManager
 import com.junaidjamshid.i211203.models.Comment
 import com.junaidjamshid.i211203.models.Post
+import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.util.*
 
@@ -33,9 +32,9 @@ class AddPostFragment : Fragment() {
     private lateinit var captionInput: EditText
     private lateinit var shareButton: Button
 
-    // Firebase
-    private lateinit var auth: FirebaseAuth
-    private lateinit var database: FirebaseDatabase
+    // API Service and Session Manager
+    private lateinit var apiService: ApiService
+    private lateinit var sessionManager: SessionManager
 
     // Image URI
     private var selectedImageUri: Uri? = null
@@ -58,9 +57,9 @@ class AddPostFragment : Fragment() {
         captionInput = view.findViewById(R.id.caption_input)
         shareButton = view.findViewById(R.id.share)
 
-        // Initialize Firebase
-        auth = FirebaseAuth.getInstance()
-        database = FirebaseDatabase.getInstance()
+        // Initialize API service and Session Manager
+        apiService = ApiService(requireContext())
+        sessionManager = SessionManager(requireContext())
 
         // Set click listeners
         setupClickListeners()
@@ -87,7 +86,7 @@ class AddPostFragment : Fragment() {
         // Share button click listener
         shareButton.setOnClickListener {
             if (validatePost()) {
-                uploadPostToFirebase()
+                uploadPost()
             }
         }
     }
@@ -122,19 +121,17 @@ class AddPostFragment : Fragment() {
         return true
     }
 
-    private fun uploadPostToFirebase() {
+    private fun uploadPost() {
         // Show loading
         showLoading(true)
 
-        val currentUser = auth.currentUser
-        if (currentUser == null) {
+        // Get the user ID from session
+        val userId = sessionManager.getUserId()
+        if (userId.isNullOrEmpty()) {
             Toast.makeText(context, "User not logged in", Toast.LENGTH_SHORT).show()
             showLoading(false)
             return
         }
-
-        // Get current user ID
-        val userId = currentUser.uid
 
         // Get the caption text
         val caption = captionInput.text.toString().trim()
@@ -147,40 +144,67 @@ class AddPostFragment : Fragment() {
             return
         }
 
-        // Get user information to add to the post
-        getUserInfo(userId) { username, profileImageUrl ->
-            // Create post ID
-            val postId = database.reference.child("posts").push().key ?: return@getUserInfo
+        // Use coroutine to perform network operations
+        lifecycleScope.launch {
+            try {
+                // First get the user profile to include username and profile image
+                val userProfileResult = apiService.getUserProfile(userId)
 
-            // Create post object
-            val post = Post(
-                postId = postId,
-                userId = userId,
-                username = username,
-                userProfileImage = profileImageUrl,
-                postImageUrl = imageBase64,
-                caption = caption,
-                timestamp = System.currentTimeMillis(),
-                likes = mutableMapOf(),
-                comments = mutableListOf()
-            )
+                if (userProfileResult.isSuccess) {
+                    val user = userProfileResult.getOrNull()!!
 
-            // Save post to Firebase Realtime Database
-            database.reference.child("posts").child(postId).setValue(post)
-                .addOnSuccessListener {
-                    Toast.makeText(context, "Post uploaded successfully", Toast.LENGTH_SHORT).show()
+                    // Create a unique post ID
+                    val postId = UUID.randomUUID().toString()
 
+                    // Create post object
+                    val post = Post(
+                        postId = postId,
+                        userId = userId,
+                        username = user.username,
+                        userProfileImage = user.profilePicture ?: "",
+                        postImageUrl = imageBase64, // We'll store base64 for offline posts
+                        caption = caption,
+                        timestamp = System.currentTimeMillis(),
+                        likes = mutableMapOf(),
+                        comments = mutableListOf()
+                    )
 
+                    // Try to create the post
+                    val createPostResult = apiService.createPost(post)
 
-                    // Clear inputs and go back
-                    clearInputs()
+                    if (createPostResult.isSuccess) {
+                        Toast.makeText(context, "Post uploaded successfully", Toast.LENGTH_SHORT).show()
+
+                        // If we're online and just created the post, try to sync any pending posts
+                        apiService.syncPendingPosts()
+
+                        // Clear inputs and go back
+                        clearInputs()
+                        showLoading(false)
+                        requireActivity().onBackPressed()
+                    } else {
+                        val error = createPostResult.exceptionOrNull()?.message ?: "Unknown error"
+
+                        if (error.contains("internet") || error.contains("network")) {
+                            // If it's a network error but we saved locally
+                            Toast.makeText(context, "Post saved offline and will sync when online", Toast.LENGTH_LONG).show()
+                            clearInputs()
+                            showLoading(false)
+                            requireActivity().onBackPressed()
+                        } else {
+                            Toast.makeText(context, "Failed to upload post: $error", Toast.LENGTH_SHORT).show()
+                            showLoading(false)
+                        }
+                    }
+                } else {
+                    val error = userProfileResult.exceptionOrNull()?.message ?: "Unknown error"
+                    Toast.makeText(context, "Failed to get user profile: $error", Toast.LENGTH_SHORT).show()
                     showLoading(false)
-
                 }
-                .addOnFailureListener { e ->
-                    Toast.makeText(context, "Failed to upload post: ${e.message}", Toast.LENGTH_SHORT).show()
-                    showLoading(false)
-                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                showLoading(false)
+            }
         }
     }
 
@@ -221,22 +245,6 @@ class AddPostFragment : Fragment() {
         }
 
         return Bitmap.createScaledBitmap(bitmap, width, height, true)
-    }
-
-    private fun getUserInfo(userId: String, callback: (String, String) -> Unit) {
-        database.reference.child("Users").child(userId).addListenerForSingleValueEvent(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val username = snapshot.child("username").getValue(String::class.java) ?: "Unknown"
-                val profileImageUrl = snapshot.child("profilePicture").getValue(String::class.java) ?: ""
-
-                callback(username, profileImageUrl)
-            }
-
-            override fun onCancelled(error: DatabaseError) {
-                Toast.makeText(context, "Failed to get user info: ${error.message}", Toast.LENGTH_SHORT).show()
-                callback("Unknown", "")
-            }
-        })
     }
 
     private fun clearInputs() {

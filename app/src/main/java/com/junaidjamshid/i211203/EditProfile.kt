@@ -6,7 +6,6 @@ import android.app.ProgressDialog
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Base64
@@ -17,21 +16,21 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.DataSnapshot
-import com.google.firebase.database.DatabaseError
-import com.google.firebase.database.DatabaseReference
-import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.database.ValueEventListener
+import com.junaidjamshid.i211203.HelperClasses.ApiService
+import com.junaidjamshid.i211203.HelperClasses.NetworkUtils
+import com.junaidjamshid.i211203.HelperClasses.SessionManager
 import com.junaidjamshid.i211203.models.User
 import de.hdodenhof.circleimageview.CircleImageView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 
 class EditProfile : AppCompatActivity() {
 
-    private lateinit var auth: FirebaseAuth
-    private lateinit var database: DatabaseReference
     private lateinit var profileImageView: CircleImageView
     private lateinit var nameEditText: EditText
     private lateinit var usernameEditText: EditText
@@ -39,6 +38,9 @@ class EditProfile : AppCompatActivity() {
     private lateinit var bioEditText: EditText
     private lateinit var doneButton: TextView
     private lateinit var progressDialog: ProgressDialog
+
+    private lateinit var sessionManager: SessionManager
+    private lateinit var apiService: ApiService
 
     private var profileImageByteArray: ByteArray? = null
     private var currentUser: User? = null
@@ -93,9 +95,9 @@ class EditProfile : AppCompatActivity() {
         supportActionBar?.hide() // Hide Action Bar
         setContentView(R.layout.activity_edit_profile)
 
-        // Initialize Firebase
-        auth = FirebaseAuth.getInstance()
-        database = FirebaseDatabase.getInstance().reference
+        // Initialize services
+        sessionManager = SessionManager(this)
+        apiService = ApiService(this)
 
         // Initialize views
         profileImageView = findViewById(R.id.profile_image)
@@ -129,15 +131,15 @@ class EditProfile : AppCompatActivity() {
         progressDialog.setMessage("Loading profile...")
         progressDialog.show()
 
-        val userId = auth.currentUser?.uid
+        val userId = sessionManager.getUserId()
 
-        if (userId != null) {
-            database.child("Users").child(userId).addListenerForSingleValueEvent(object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    progressDialog.dismiss()
+        if (userId?.isNotEmpty() ?: false ) {
+            CoroutineScope(Dispatchers.Main).launch {
+                try {
+                    val result = apiService.getUserProfile(userId.toString())
 
-                    if (snapshot.exists()) {
-                        val user = snapshot.getValue(User::class.java)
+                    if (result.isSuccess) {
+                        val user = result.getOrNull()
                         currentUser = user
 
                         user?.let {
@@ -155,14 +157,17 @@ class EditProfile : AppCompatActivity() {
                                 profileImageView.setImageBitmap(bitmap)
                             }
                         }
+                        progressDialog.dismiss()
+                    } else {
+                        progressDialog.dismiss()
+                        val error = result.exceptionOrNull()?.message ?: "Failed to load user data"
+                        Toast.makeText(this@EditProfile, error, Toast.LENGTH_SHORT).show()
                     }
-                }
-
-                override fun onCancelled(error: DatabaseError) {
+                } catch (e: Exception) {
                     progressDialog.dismiss()
-                    Toast.makeText(this@EditProfile, "Failed to load user data: ${error.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@EditProfile, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
-            })
+            }
         } else {
             progressDialog.dismiss()
             Toast.makeText(this, "User not logged in", Toast.LENGTH_SHORT).show()
@@ -213,37 +218,166 @@ class EditProfile : AppCompatActivity() {
 
         progressDialog.show()
 
-        val userId = auth.currentUser?.uid
+        val userId = sessionManager.getUserId()
 
-        if (userId != null) {
-            // Create user updates map
-            val userUpdates = HashMap<String, Any?>()
-            userUpdates["fullName"] = name
-            userUpdates["username"] = username
-            userUpdates["phoneNumber"] = phone
-            userUpdates["bio"] = bio
+        if (userId?.isNotEmpty() ?: false) {
+            // Create updates map
+            val updates = JSONObject().apply {
+                put("fullName", name)
+                put("username", username)
+                put("phoneNumber", phone)
+                put("bio", bio)
 
-            // Update profile picture if changed
-            if (profileImageByteArray != null) {
-                val base64Image = Base64.encodeToString(profileImageByteArray, Base64.DEFAULT)
-                userUpdates["profilePicture"] = base64Image
+                // Add profile picture if changed
+                if (profileImageByteArray != null) {
+                    val base64Image = Base64.encodeToString(profileImageByteArray, Base64.DEFAULT)
+                    put("profilePicture", base64Image)
+                }
             }
 
-            database.child("Users").child(userId).updateChildren(userUpdates)
-                .addOnCompleteListener { task ->
-                    progressDialog.dismiss()
-
-                    if (task.isSuccessful) {
-                        Toast.makeText(this, "Profile updated successfully", Toast.LENGTH_SHORT).show()
-                        finish()
+            CoroutineScope(Dispatchers.Main).launch {
+                try {
+                    // Check network connectivity first
+                    if (NetworkUtils.isNetworkAvailable(this@EditProfile)) {
+                        // Online update
+                        val result = updateUserProfileOnline(userId, updates)
+                        handleUpdateResult(result)
                     } else {
-                        Toast.makeText(this, "Failed to update profile: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
+                        // Update locally and queue for sync later
+                        val result = updateUserProfileOffline(userId, name, username, phone, bio, profileImageByteArray)
+                        handleUpdateResult(result)
                     }
+                } catch (e: Exception) {
+                    progressDialog.dismiss()
+                    Toast.makeText(this@EditProfile, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
+            }
         } else {
             progressDialog.dismiss()
             Toast.makeText(this, "User not logged in", Toast.LENGTH_SHORT).show()
             finish()
+        }
+    }
+
+    private suspend fun updateUserProfileOnline(userId: String, updates: JSONObject): Result<Boolean> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val baseUrl = "http://10.0.2.2:3000/api"
+                val updateEndpoint = "$baseUrl/users/$userId"
+                val token = sessionManager.getAuthToken()
+
+                if (token == null) {
+                    return@withContext Result.failure(Exception("Authentication token not found"))
+                }
+
+                val url = java.net.URL(updateEndpoint)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "PUT"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.doOutput = true
+
+                // Write request body
+                val outputStream = connection.outputStream
+                val writer = java.io.OutputStreamWriter(outputStream)
+                writer.write(updates.toString())
+                writer.flush()
+                writer.close()
+
+                val responseCode = connection.responseCode
+
+                if (responseCode == 200) {
+                    // Update successful, now update local storage with the new data
+                    val user = currentUser?.apply {
+                        fullName = updates.getString("fullName")
+                        username = updates.getString("username")
+                        phoneNumber = updates.getString("phoneNumber")
+                        bio = updates.getString("bio")
+
+                        if (updates.has("profilePicture")) {
+                            profilePicture = updates.getString("profilePicture")
+                        }
+                    }
+
+                    if (user != null) {
+                        apiService.dbHelper.saveUser(user)
+                    }
+
+                    return@withContext Result.success(true)
+                } else {
+                    // Handle error
+                    val reader = java.io.BufferedReader(java.io.InputStreamReader(connection.errorStream))
+                    val response = StringBuilder()
+                    var line: String?
+
+                    while (reader.readLine().also { line = it } != null) {
+                        response.append(line)
+                    }
+
+                    reader.close()
+
+                    val errorJson = JSONObject(response.toString())
+                    val errorMessage = errorJson.optString("error", "Failed to update profile")
+
+                    return@withContext Result.failure(Exception(errorMessage))
+                }
+            } catch (e: Exception) {
+                return@withContext Result.failure(e)
+            }
+        }
+    }
+
+    private suspend fun updateUserProfileOffline(
+        userId: String,
+        name: String,
+        username: String,
+        phone: String,
+        bio: String,
+        profileImageBytes: ByteArray?
+    ): Result<Boolean> {
+        return withContext(Dispatchers.IO) {
+            try {
+                // Get existing user data
+                val dbHelper = apiService.dbHelper
+                val user = dbHelper.getUserById(userId) ?: return@withContext Result.failure(Exception("User not found"))
+
+                // Update the user object
+                user.fullName = name
+                user.username = username
+                user.phoneNumber = phone
+                user.bio = bio
+
+                if (profileImageBytes != null) {
+                    user.setProfilePictureFromBytes(profileImageBytes)
+                }
+
+                // Save to local database
+                dbHelper.saveUser(user)
+
+                // Mark for future syncing when online
+                // You would implement a sync queue mechanism here
+
+                return@withContext Result.success(true)
+            } catch (e: Exception) {
+                return@withContext Result.failure(e)
+            }
+        }
+    }
+
+    private fun handleUpdateResult(result: Result<Boolean>) {
+        progressDialog.dismiss()
+
+        if (result.isSuccess) {
+            Toast.makeText(this@EditProfile, "Profile updated successfully", Toast.LENGTH_SHORT).show()
+
+            // Navigate back to main activity
+            val intent = Intent(this@EditProfile, MainActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+            finish()
+        } else {
+            val error = result.exceptionOrNull()?.message ?: "Failed to update profile"
+            Toast.makeText(this@EditProfile, error, Toast.LENGTH_LONG).show()
         }
     }
 }

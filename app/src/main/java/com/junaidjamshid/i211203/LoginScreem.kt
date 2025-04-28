@@ -61,6 +61,11 @@ class LoginScreem : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.Main).launch {
             try {
+                // First check if we have internet
+                val isOnline = withContext(Dispatchers.IO) {
+                    NetworkUtils.isNetworkAvailable(this@LoginScreem)
+                }
+
                 val result = apiService.loginUser(email, password)
 
                 progressDialog.dismiss()
@@ -69,6 +74,18 @@ class LoginScreem : AppCompatActivity() {
                     val user = result.getOrNull()
 
                     if (user != null) {
+                        // If online, attempt to sync the latest user data
+                        if (isOnline) {
+                            try {
+                                apiService.syncUserData(user.userId)
+                                // Log the success but don't block the login flow
+                                Log.d("LoginScreen", "User data synced successfully")
+                            } catch (e: Exception) {
+                                Log.e("LoginScreen", "Sync failed but continuing: ${e.message}")
+                                // Don't block login if sync fails
+                            }
+                        }
+
                         // Check if this is the first login for the user
                         if (user.bio.isEmpty() && user.profilePicture == null) {
                             sessionManager.setFirstTimeUser(true)
@@ -87,7 +104,8 @@ class LoginScreem : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 progressDialog.dismiss()
-                Toast.makeText(this@LoginScreem ,"Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@LoginScreem, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                Log.e("LoginError", "Exception: ${e.message}", e)
             }
         }
     }
